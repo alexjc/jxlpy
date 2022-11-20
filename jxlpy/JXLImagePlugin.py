@@ -2,7 +2,7 @@ from PIL import Image, ImageFile
 from io import BytesIO
 import jxlpy
 
-_VALID_JXL_MODES = {"RGB", "RGBA"}
+_VALID_JXL_MODES = {"RGB", "RGBA", "L"}
 
 
 def _accept(data):
@@ -13,19 +13,19 @@ def _accept(data):
 class JXLImageFile(ImageFile.ImageFile):
 
     format = "JXL"
-    format_description = "Jpeg XL image"
+    format_description = "JPEG XL image"
     __loaded = -1
     __frame = 0
 
     def _open(self):
-
         self.fc = self.fp.read()
         self._decoder = jxlpy.JXLPyDecoder(self.fc)
         
         self._jxlinfo = self._decoder.get_info()
         
         if self._jxlinfo['bits_per_sample'] != 8:
-            raise NotImplementedError('bits_per_sample not equals 8')
+            raise NotImplementedError('only 8 bits_per_sample supported')
+
         self._size = (self._jxlinfo['xsize'], self._jxlinfo['ysize'])
         self.is_animated = self._jxlinfo['have_animation']
         self.mode = self.rawmode = self._decoder.get_colorspace()
@@ -33,9 +33,7 @@ class JXLImageFile(ImageFile.ImageFile):
 
 
     def seek(self, frame):
-
         self.load()
-    
         if self.__frame+1 != frame:
             # I believe JPEG XL doesn't support seeking in animations
             raise NotImplementedError(
@@ -45,19 +43,16 @@ class JXLImageFile(ImageFile.ImageFile):
 
 
     def load(self):
-
         if self.__loaded != self.__frame:
-        
             data = self._decoder.get_frame()
             
             if data is None:
                 EOFError('no more frames')
             
-            self.__loaded = self.__frame
-            
+            self.__loaded = self.__frame            
             if self.fp and self._exclusive_fp:
                 self.fp.close()
-            self.fp = BytesIO(data)
+            self.fp = BytesIO(data[0])
             self.tile = [("raw", (0, 0) + self.size, 0, self.rawmode)]
         
         return super().load()
@@ -75,7 +70,8 @@ def _save(im, fp, filename, save_all=False):
     info = im.encoderinfo.copy()
     
     # default quality is 70
-    quality = info.get('quality', 70)
+    distance = info.get('distance', None)
+    quality = info.get('quality', 70) if not distance else None
     if info.get('lossless'):
         quality = 100
     effort = info.get('effort', 7)
@@ -84,7 +80,7 @@ def _save(im, fp, filename, save_all=False):
     num_threads = info.get('threads', 0)
     
     enc = jxlpy.JXLPyEncoder(
-        quality=quality, size=im.size, colorspace=im.mode, 
+        quality=quality, distance=distance, size=im.size, colorspace=im.mode, 
         effort=effort, decoding_speed=decoding_speed, use_container=use_container,
         num_threads=num_threads
     )
